@@ -1,4 +1,5 @@
-// SproutEA.mq5 
+// -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// AFTER REFACTOR ADDING RESTRUCTURING TO SOLVE RSI VALUE NOT SHOWING IN ARRAY. STATIC POSITION SIZING IN WHICH TP AND SL ARE FIXED ON 200 POINTS DIFFERENCE
 #include <Trade/Trade.mqh>
 CTrade trade;
 
@@ -10,16 +11,7 @@ int handleFastRSI;
 datetime lastBuyTime = 0;
 datetime lastSellTime = 0;
 
-/*
-int OnInit(){ //Called when expert starts running
-   //EventSetTimer(60); // create timer
-   
-   Print("SproutEA started running");
-   return(INIT_SUCCEEDED);
-}
-*/
-
-int OnInit() {
+int OnInit() { //Called when expert starts running
    handleSlowRSI = iRSI(_Symbol, PERIOD_H1, 14, PRICE_CLOSE);
    handleFastRSI = iRSI(_Symbol, PERIOD_M5, 14, PRICE_CLOSE);
 
@@ -32,15 +24,7 @@ int OnInit() {
    return INIT_SUCCEEDED;
 }
 
-/*
-void OnDeinit(const int reason){ //Called when expert stops running
-   Print("SproutEA stopped running");
-   EventKillTimer();
-}
-*/
-
-
-void OnDeinit(const int reason) {
+void OnDeinit(const int reason) {  //Called when expert stops running
    IndicatorRelease(handleSlowRSI);
    IndicatorRelease(handleFastRSI);
    Print("SproutEA stopped running");
@@ -103,7 +87,8 @@ void OnTick() {
            "\nLast Sell: ", lastSellTime);
 }
 
-// OLD VERSION OF OnTIck() before refactor. Reason of refactor: RSI results in array did not get outputted. EIther not filled in or output method is wrong.
+// -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// OLD VERSION OF OnTick() before refactor. Reason of refactor: RSI results in array did not get outputted. EIther not filled in or output method is wrong.
 /*
 void OnTick(){ //Called every tick. Define mechanism every tick
    static datetime timestamp;
