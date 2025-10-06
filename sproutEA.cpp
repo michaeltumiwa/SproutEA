@@ -1,4 +1,10 @@
 // NEWEST VERSION AS OF BEFORE MEETING HARRY OFFLINE. ADDED SOME IPMROVEMENTS TO SHOW RSI PARAMETERS BUT DIDNT SHOW ANYTHING IDK WHY.
+// HAD SOME PROBLEMS WITH:
+    // - Lot size not changing
+// SOME SUGGESTIONS FROM HARRY:
+    // - CHANGE RSI PERIODS TO 9
+// WHAT WERE DONE FROM HERE:
+    // CHANGE STRATEGY FIRST TO NO STOP LOSS. TRYING NEW CONCEPT THAT IS WHAT ORIGINALLY WAS EXPECTED.
 // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 // SproutEA.mq5 
 #property indicator_separate_window
