@@ -1,3 +1,348 @@
+//MAJOR REFACTOR. GOES BACK TO IDEA. (DONE IN OFFICE WHEN CONSULTING WITH HARRY)
+// SproutEA.mq5 
+
+
+#include <Trade/Trade.mqh>
+CTrade trade;
+
+// Configurable inputs (to find what would be the most optimal)
+
+// starting lot size
+input double init_lot_size  = 0.01;
+
+// multiplier when averaging
+input double lot_size_multi = 1.5;
+
+// step in points for averaging
+input int    init_dist      = 200;
+
+// multiplier for step widening when averaging
+input double dist_multi     = 1.5;
+
+// TP distance in points from breakeven
+input int    tp_dist        = 100;
+
+// SL distance in points from first entry (fixed, should be user-optimized)
+input int    sl_dist        = 500;
+
+// minutes cooldown between same-direction entries
+input int    timeout        = 15;
+
+// Indicator handles
+int handleSlowRSI;
+int handleFastRSI;
+
+// Cooldown trackers
+datetime lastBuyTime = 0;
+datetime lastSellTime = 0;
+
+// Series State (think of series as a struct that provides a snapshot of the statistics of the open buys or sell orders)
+struct SeriesState {
+   bool     active;            // if there exist buy or sell series of orders
+   double   first_entry;       // price of first position in the series
+   double   last_entry;        // last averaging order price
+   double   total_lots;        // sum of lots
+   double   weighted_px_sum;   // sum(price * lots)
+   double   unified_tp;        // common TP
+   double   unified_sl;        // common SL
+   int      levels;            // number of positions
+   datetime last_entry_time;   // time of last order
+};
+SeriesState buyS, sellS;
+
+// Helpers Functions
+double P(){
+   return SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+}
+
+double Ask(){
+   return SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+}
+
+double Bid(){
+   return SymbolInfoDouble(_Symbol, SYMBOL_BID);
+}
+
+// Lot precision from volume step (no SYMBOL_VOLUME_DIGITS in MT5)
+int LotDigits(){
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) return 2; // fallback
+   int d = 0;
+   // count decimals in step, e.g. 0.01 -> 2
+   while(step < 1.0 && d < 10){
+      step *= 10.0;
+      d++;
+      double rounded = MathRound(step);
+      if(MathAbs(step - rounded) < 1e-10) break;
+   }
+   return d;
+}
+
+// Refresh series stats from open positions
+// mechanism is by looping through every open position in the account
+void RefreshSeries(ENUM_POSITION_TYPE side, SeriesState &S) {
+   S.active = false;
+   S.first_entry = 0.0;
+   S.last_entry  = 0.0;
+   S.total_lots = 0.0;
+   S.weighted_px_sum = 0.0;
+   S.levels = 0;
+
+   int total = (int)PositionsTotal();
+   for(int i=0; i<total; i++){
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != side) continue;
+
+      double vol   = PositionGetDouble(POSITION_VOLUME);
+      double price = PositionGetDouble(POSITION_PRICE_OPEN);
+
+      if(S.levels == 0){
+         S.first_entry = price;
+         S.last_entry  = price;
+      } else {
+         if(side == POSITION_TYPE_BUY){
+            // For buys, newest averaging should be the lowest price (adverse move)
+            if(price < S.last_entry) S.last_entry = price;
+         } else {
+            // For sells, newest averaging should be the highest price
+            if(price > S.last_entry) S.last_entry = price;
+         }
+      }
+
+      S.total_lots      += vol;
+      S.weighted_px_sum += price * vol;
+      S.levels++;
+      S.active = true;
+   }
+
+   // Recalculate unified TP and SL if active
+   if(S.active){
+      double be = S.weighted_px_sum / MathMax(S.total_lots, 0.0000001);
+      if(side == POSITION_TYPE_BUY){
+         S.unified_tp = be + tp_dist * P();
+         S.unified_sl = S.first_entry - sl_dist * P();
+      } else {
+         S.unified_tp = be - tp_dist * P();
+         S.unified_sl = S.first_entry + sl_dist * P();
+      }
+   }
+}
+
+// Sync TP/SL across all open positions in a series
+void PushUnifiedTP_SL(ENUM_POSITION_TYPE side, const SeriesState &S) {
+   if(!S.active) return;
+
+   int total = (int)PositionsTotal();
+   for(int i=0; i<total; i++){
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != side) continue;
+
+      double cur_sl = PositionGetDouble(POSITION_SL);
+      double cur_tp = PositionGetDouble(POSITION_TP);
+
+      if(MathAbs(cur_sl - S.unified_sl) > 0.5*P() || MathAbs(cur_tp - S.unified_tp) > 0.5*P()){
+         // Modify THIS position by ticket (3-arg overload)
+         ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+         trade.PositionModify(ticket, S.unified_sl, S.unified_tp);
+      }
+   }
+}
+
+// Compute next lot (martingale progression)
+double NextLotFor(ENUM_POSITION_TYPE side, const SeriesState &S){
+   if(!S.active) return init_lot_size;
+   double lastLot = 0.0;
+   datetime lastTime = 0;
+
+   int total = (int)PositionsTotal();
+   for(int i=0; i<total; i++){
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != side) continue;
+
+      datetime opentime = (datetime)PositionGetInteger(POSITION_TIME);
+      double vol       = PositionGetDouble(POSITION_VOLUME);
+
+      if(opentime > lastTime){
+         lastTime = opentime;
+         lastLot = vol;
+      }
+   }
+
+   if(lastLot <= 0.0) lastLot = init_lot_size;
+   return NormalizeDouble(lastLot * lot_size_multi, LotDigits());
+}
+
+
+// Averaging conditions (only add when trend is going on opposite direction)
+bool ShouldAverageBuy(const SeriesState &S){
+   if(!S.active) return false;
+   return Ask() <= (S.last_entry - init_dist * P());
+}
+bool ShouldAverageSell(const SeriesState &S){
+   if(!S.active) return false;
+   return Bid() >= (S.last_entry + init_dist * P());
+}
+
+// Place one buy level (first or averaging)
+bool PlaceBuyLevel(){
+   double lot   = NextLotFor(POSITION_TYPE_BUY, buyS);
+   double price = Ask();
+   double sl    = price - sl_dist * P();
+   double tp    = price + tp_dist * P();
+
+   bool ok = trade.Buy(lot, _Symbol, price, sl, tp, "Buy series");
+   if(ok){
+      lastBuyTime = TimeCurrent();
+      RefreshSeries(POSITION_TYPE_BUY, buyS);
+      PushUnifiedTP_SL(POSITION_TYPE_BUY, buyS); // unify to BE+tp and first_entry-sl
+   }
+   return ok;
+}
+
+// Place one sell level (first or averaging)
+bool PlaceSellLevel(){
+   double lot   = NextLotFor(POSITION_TYPE_SELL, sellS);
+   double price = Bid();
+   double sl    = price + sl_dist * P();
+   double tp    = price - tp_dist * P();
+
+   bool ok = trade.Sell(lot, _Symbol, price, sl, tp, "Sell series");
+   if(ok){
+      lastSellTime = TimeCurrent();
+      RefreshSeries(POSITION_TYPE_SELL, sellS);
+      PushUnifiedTP_SL(POSITION_TYPE_SELL, sellS);
+   }
+   return ok;
+}
+
+// Cooldown
+bool CooldownOk(datetime lastT){
+   return (TimeCurrent() - lastT) >= timeout*60;
+}
+
+int OnInit() { //runs when EA is deployed
+
+   handleSlowRSI = iRSI(_Symbol, PERIOD_H1, 14, PRICE_CLOSE);
+   handleFastRSI = iRSI(_Symbol, PERIOD_M5, 14, PRICE_CLOSE);
+   if(handleSlowRSI == INVALID_HANDLE || handleFastRSI == INVALID_HANDLE){
+      Print("Error creating RSI handles");
+      return INIT_FAILED;
+   }
+   RefreshSeries(POSITION_TYPE_BUY, buyS);
+   RefreshSeries(POSITION_TYPE_SELL, sellS);
+   Print("SproutEA started");
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason) {
+   IndicatorRelease(handleSlowRSI);
+   IndicatorRelease(handleFastRSI);
+   Print("SproutEA stopped running");
+}
+
+void OnTick() {
+   // Run on new M5 bar (not every tick)
+   static datetime lastBarTime = 0;
+   datetime bar = iTime(_Symbol, PERIOD_M5, 0);
+   if(bar == lastBarTime){
+      return;
+   }
+   lastBarTime = bar;
+
+   // RSI buffers
+   double slowRSI[1], fastRSI[1];
+   if(CopyBuffer(handleSlowRSI, 0, 0, 1, slowRSI) < 0) return;
+   if(CopyBuffer(handleFastRSI, 0, 0, 1, fastRSI) < 0) return;
+   double h1RSI = slowRSI[0];
+   double m5RSI = fastRSI[0];
+
+   // Sync current series snapshots
+   RefreshSeries(POSITION_TYPE_BUY,  buyS);
+   RefreshSeries(POSITION_TYPE_SELL, sellS);
+
+   // BUY direction
+   if(h1RSI > 50 && m5RSI < 30){
+      if(!buyS.active){
+         if(CooldownOk(lastBuyTime)) PlaceBuyLevel(); // start series
+      } else if(CooldownOk(lastBuyTime) && ShouldAverageBuy(buyS)){
+         PlaceBuyLevel();                             // add level
+      }
+   }
+
+   // SELL direction
+   if(h1RSI < 50 && m5RSI > 70){
+      if(!sellS.active){
+         if(CooldownOk(lastSellTime)) PlaceSellLevel();
+      } else if(CooldownOk(lastSellTime) && ShouldAverageSell(sellS)){
+         PlaceSellLevel();
+      }
+   }
+
+   // Keep unified exits synced
+   PushUnifiedTP_SL(POSITION_TYPE_BUY,  buyS);
+   PushUnifiedTP_SL(POSITION_TYPE_SELL, sellS);
+
+   Comment(
+      "H1 RSI: ", DoubleToString(h1RSI,2),
+      "\nM5 RSI: ", DoubleToString(m5RSI,2),
+      "\nBuy series active: ", buyS.active, " levels: ", buyS.levels,
+      "\nSell series active: ", sellS.active, " levels: ", sellS.levels
+   );
+}
+
+void OnTimer(){   
+}
+
+
+void OnTrade(){
+}
+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result){
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD){
+      return;
+   }
+   RefreshSeries(POSITION_TYPE_BUY,  buyS);
+   RefreshSeries(POSITION_TYPE_SELL, sellS);
+}
+
+double OnTester(){
+   double ret=0.0;
+   return(ret);
+}
+
+
+void OnTesterInit(){
+}
+
+
+void OnTesterPass(){
+}
+
+
+void OnTesterDeinit(){
+}
+
+
+void OnChartEvent(const int32_t id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam){
+}
+
+
+void OnBookEvent(const string &symbol){
+}
+
+
 // NEWEST VERSION AS OF BEFORE MEETING HARRY OFFLINE. ADDED SOME IPMROVEMENTS TO SHOW RSI PARAMETERS BUT DIDNT SHOW ANYTHING IDK WHY.
 // HAD SOME PROBLEMS WITH:
     // - Lot size not changing
