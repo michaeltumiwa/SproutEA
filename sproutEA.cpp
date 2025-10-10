@@ -1,3 +1,19 @@
+// -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// NEWEST VERSION AS OF 10 OCT 2025.
+   // Made successful backtests of
+      // - 10k capital, sept 2024 - sept 2025
+      // - 100k capital, sept 2015 - sept 2025 (with data loss 2015 - 2016) thus not sure.
+   // Problems:
+      // Data quality. 40% only. Will try to better this by adopting tick data suite.
+      // uncertainty about leverage?
+   // Future Improvements
+
+
+
+
+
+
+// -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //MAJOR REFACTOR. GOES BACK TO IDEA. (DONE IN OFFICE WHEN CONSULTING WITH HARRY)
 // SproutEA.mq5 
 
