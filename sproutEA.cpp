@@ -1,13 +1,14 @@
 // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 // NEWEST VERSION AS OF 10 OCT 2025.
    // Made successful backtests of
-      // - 10k capital, sept 2024 - sept 2025
-      // - 100k capital, sept 2015 - sept 2025 (with data loss 2015 - 2016) thus not sure.
+      // - 10k capital, sept 2024 to sept 2025
+      // - 100k capital, sept 2015 to sept 2025 (with data loss 2015 - 2016) thus not sure.
    // Problems:
       // Data quality. 40% only. Will try to better this by adopting tick data suite.
       // uncertainty about leverage?
    // Future Improvements
-
+      // Try 3 methods: no SL again but with EURUSD, 10% account balance SL, sl_dist w/ optimization for the distance.
+      // Tick data suite adoption for better historical data quality.
 
 
 
