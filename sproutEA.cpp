@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-// FINAL VERSION SO FAR (?)
+// FINAL VERSION SO FAR. added a commented logic block of stop loss mechanism based on 10% capital.
 
 // SproutEA.mq5 
 
@@ -236,6 +236,26 @@ bool CooldownOk(datetime lastT){
 }
 
 int OnInit() { //runs when EA is deployed
+
+   
+   // logic for fixed capital percentage stop loss:
+   /*
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+   double drawdown = (balance - equity) / balance;
+
+   if(drawdown >= 0.10) {  // 10% loss
+      Print("Equity drawdown exceeds 10%. Closing all positions.");
+      int total = PositionsTotal();
+      for(int i = total - 1; i >= 0; i--) {
+         ulong ticket = PositionGetTicket(i);
+         if(PositionSelectByTicket(ticket)) {
+            trade.PositionClose(ticket);
+         }
+      }
+      return;
+   }
+   */
 
    handleSlowRSI = iRSI(_Symbol, PERIOD_H1, 14, PRICE_CLOSE);
    handleFastRSI = iRSI(_Symbol, PERIOD_M5, 14, PRICE_CLOSE);
