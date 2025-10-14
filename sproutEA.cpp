@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-// FINAL VERSION SO FAR. added a commented logic block of stop loss mechanism based on 10% capital.
+// FINAL VERSION SO FAR. added a commented logic block of stop loss mechanism based on 10% capital. ALso made it into input for it to be optimizable
 
 // SproutEA.mq5 
 
@@ -29,6 +29,9 @@ input int    sl_dist        = 100000;
 
 // minutes cooldown between same-direction entries
 input int    timeout        = 0;
+
+// percent of total balance to risk before closing all
+input double max_equity_drawdown = 100.0;  
 
 // Indicator handles
 int handleSlowRSI;
@@ -236,27 +239,6 @@ bool CooldownOk(datetime lastT){
 }
 
 int OnInit() { //runs when EA is deployed
-
-   
-   // logic for fixed capital percentage stop loss:
-   /*
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
-   double drawdown = (balance - equity) / balance;
-
-   if(drawdown >= 0.10) {  // 10% loss
-      Print("Equity drawdown exceeds 10%. Closing all positions.");
-      int total = PositionsTotal();
-      for(int i = total - 1; i >= 0; i--) {
-         ulong ticket = PositionGetTicket(i);
-         if(PositionSelectByTicket(ticket)) {
-            trade.PositionClose(ticket);
-         }
-      }
-      return;
-   }
-   */
-
    handleSlowRSI = iRSI(_Symbol, PERIOD_H1, 14, PRICE_CLOSE);
    handleFastRSI = iRSI(_Symbol, PERIOD_M5, 14, PRICE_CLOSE);
    if(handleSlowRSI == INVALID_HANDLE || handleFastRSI == INVALID_HANDLE){
@@ -276,6 +258,23 @@ void OnDeinit(const int reason) {
 }
 
 void OnTick() {
+
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+   double drawdown = (balance - equity) / balance;
+   
+   if(drawdown >= max_equity_drawdown / 100.0) {
+      Print("Equity drawdown exceeds ", max_equity_drawdown, "%. Closing all positions.");
+      int total = PositionsTotal();
+      for(int i = total - 1; i >= 0; i--) {
+        ulong ticket = PositionGetTicket(i);
+        if(PositionSelectByTicket(ticket)) {
+            trade.PositionClose(ticket);
+        }
+      }
+      return;
+   }
+
    // Run on new M5 bar (not every tick)
    static datetime lastBarTime = 0;
    datetime bar = iTime(_Symbol, PERIOD_M5, 0);
